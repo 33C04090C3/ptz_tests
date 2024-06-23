@@ -15,6 +15,7 @@
 
 #include "ptz_tests.h"
 
+
 const uint32_t get_fixed_config_address( const int fixed_config )
 {
     switch( fixed_config )
@@ -219,6 +220,54 @@ bool ptz_write_buffer( int ptz_fd, uint8_t* buffer, size_t len, int config_val )
     return true;
 }
 
+bool ptz_pre_open(int config_val)
+{
+
+    uint32_t tmp1 = 0;
+
+    switch( config_val )
+    {
+        case 1:
+            dev_mem_mmap_put_u32( 0x200F004C, 0 );
+            dev_mem_mmap_get_u32( 0x201A0400, &tmp1 );
+            tmp1 |= 1;
+            dev_mem_mmap_put_u32( 0x201A0400, tmp1 );
+            dev_mem_mmap_put_u32( 0x200F0050, 1 );
+            dev_mem_mmap_put_u32( 0x200F0058, 1);
+            break;
+
+        case 2:
+            dev_mem_mmap_put_u32( 0x200F010C, 0 );
+            dev_mem_mmap_get_u32( 0x201C0400, &tmp1 );
+            tmp1 |= 1;
+            dev_mem_mmap_put_u32( 0x201C0400, tmp1 );
+            dev_mem_mmap_put_u32( 0x200F0110, 1 );
+            dev_mem_mmap_put_u32( 0x200F0118, 1 );
+            break;
+        case 5:
+            dev_mem_mmap_put_u32( 0x200F01A0, 0 );
+            dev_mem_mmap_get_u32( 0x20210400, &tmp1 );
+            tmp1 |= 0x40;
+            dev_mem_mmap_put_u32( 0x20210400, tmp1 );
+            dev_mem_mmap_put_u32( 0x200F01A4, 1 );
+            dev_mem_mmap_put_u32( 0x200F01A8, 1 );
+            break;
+        case 6:
+        case 7:
+            dev_mem_mmap_put_u32( 0x200F0150, 0 );
+            dev_mem_mmap_get_u32( 0x201E0400, &tmp1 );
+            tmp1 |= 1;
+            dev_mem_mmap_put_u32( 0x201E0400, tmp1 );
+            dev_mem_mmap_put_u32( 0x200F0154, 1 );
+            dev_mem_mmap_put_u32( 0x200F015C, 1 );
+            break;
+        default:
+            printf( "[-] ptz_pre_open() - unrecognised config value %d\n", config_val );
+            return false;
+    }
+    return true;
+}
+
 bool ptz_open( const char* devicename, int* fd_out )
 {
     uint32_t tmp1 = 0;
@@ -291,6 +340,7 @@ void print_usage( const char* name )
     printf( "Options:\n" );
     printf( "   -b : set baud rate to 9600\n" );
     printf( "   -h : print this help\n" );
+    printf( "   -p : try hardware preconfiguration\n" );
     printf( "   -1 : use configuration value 1\n" );
     printf( "   -2 : use configuration value 2\n" );
     printf( "   -5 : use configuration value 5\n" );
@@ -310,6 +360,7 @@ int main( int argc, char* argv[] )
     // (the actual value is stored in the DVR configuration somewhere but not very accessibly)
     int config = 0;
     bool do_baud_rate = false;
+    bool preconfig    = false;
 
     printf( "[+] RS485 PELCO-D PTZ TESTER\n" );
 
@@ -350,6 +401,11 @@ int main( int argc, char* argv[] )
         }
     }
 
+    if( preconfig == true )
+    {
+        printf( "[+] Doing hardware preconfiguration...\n" );
+        ptz_pre_open(config);
+    }
 
     // actually do the work
     if( ptz_open( "/dev/ttyAMA1", &fd ) == false )
