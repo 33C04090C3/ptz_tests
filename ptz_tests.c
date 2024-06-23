@@ -198,7 +198,6 @@ bool ptz_write_buffer( int ptz_fd, uint8_t* buffer, size_t len, int config_val )
         {
             break;
         }
-        // this is in the Sofia code, so I do it here as well
         usleep(0);
     }
     // turn the CR bit RTS back on (not sure why, might be controlling the RS485 chip or something)
