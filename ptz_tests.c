@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <stdbool.h>
 #include <sys/mman.h>
+#include <sys/ioctl.h>
 #include <errno.h>
 #include <termios.h>
 
@@ -268,12 +269,47 @@ bool ptz_pre_open(int config_val)
     return true;
 }
 
+// for type 7
+bool ptz_preconfig_improved(void)
+{
+    uint32_t tmp1 = 0;
+    if( dev_mem_mmap_put( 0x200F0150, 0 ) == false )
+    {
+        printf( "[-] ptz_preconfig_improved() dev_mem_mmap_put(0x200F0150, 0) failed\n" );
+        return false;
+    }
+    if( dev_mem_mmap_get( 0x201E0400, &tmp1 ) == false )
+    {
+        printf( "[-] ptz_preconfig_improved() dev_mem_mmap_get(0x200E0400) failed\n" );
+        return false;
+    }
+    tmp1 |= 1;
+    if( dev_mem_mmap_put( 0x201E0400, tmp1 ) == false )
+    {
+        printf( "[-] ptz_preconfig_improved() dev_mem_mmap_put(0x200E0400, %08X) failed\n", tmp1 );
+        return false;
+    }
+    if( dev_mem_mmap_put( 0x200F0154, 1 ) == false )
+    {
+        printf( "[-] ptz_preconfig_improved() dev_mem_mmap_put(0x200F0154, 1) failed\n" );
+        return false;
+    }
+    if( dev_mem_mmap_put( 0x200F015C, 1 ) == false )
+    {
+        printf( "[-] ptz_preconfig_improved() dev_mem_mmap_put(0x200F015C, 1) failed\n" );
+        return false;
+    }
+
+    return true;
+}
+
 bool ptz_open( const char* devicename, int* fd_out )
 {
     uint32_t tmp1 = 0;
     int fd        = 0;
 
-    fd = open( devicename, O_EXCL | O_NOFOLLOW | O_RDWR );
+    // these are the flags used by the DVR code
+    fd = open( devicename, 0x902 );
     if( fd < 0 )
     {
         printf( "ptz_open() cannot open device %s - %u\n", devicename, errno );
@@ -334,18 +370,70 @@ bool set_baud_rate( int fd, speed_t baud_rate )
     return true;
 }
 
+bool toggle_cts(int fd, bool on)
+{
+    int status = 0;
+    if( ioctl( fd, TIOCMGET, &status ) < 0 )
+    {
+        printf( "[-] error getting TIOCMGET\n" );
+        return false;    
+    }
+
+    if( on == true )
+    {
+        status |= TIOCM_CTS;
+    }
+    else
+    {
+        status &= ~TIOCM_CTS;
+    }
+
+    if( ioctl( fd, TIOCMSET, &status ) < 0 )
+    {
+        printf( "[-] error setting TIOCMGET\n" );
+        return false;    
+    }
+}
+
+bool toggle_rts(int fd, bool on)
+{
+    int status = 0;
+    if( ioctl( fd, TIOCMGET, &status ) < 0 )
+    {
+        printf( "[-] error getting TIOCMGET\n" );
+        return false;    
+    }
+
+    if( on == true )
+    {
+        status |= TIOCM_RTS;
+    }
+    else
+    {
+        status &= ~TIOCM_RTS;
+    }
+
+    if( ioctl( fd, TIOCMSET, &status ) < 0 )
+    {
+        printf( "[-] error setting TIOCMGET\n" );
+        return false;    
+    }
+}
+
+
 void print_usage( const char* name )
 {
     printf( "Usage: %s [options]\n", name );
     printf( "Options:\n" );
-    printf( "   -b : set baud rate to 9600\n" );
-    printf( "   -h : print this help\n" );
+    printf( "   -b : explicitly set baud rate to 9600\n" );
+    printf( "   -h : print this help and don't do anything else\n" );
     printf( "   -p : try hardware preconfiguration\n" );
     printf( "   -1 : use configuration value 1\n" );
     printf( "   -2 : use configuration value 2\n" );
     printf( "   -5 : use configuration value 5\n" );
     printf( "   -6 : use configuration value 6" );
     printf( "   -7 : use configuration value 7\n" );
+    printf( "   -i : use improved preconfiguration and other settings\n" );
 }
 
 int main( int argc, char* argv[] )
@@ -358,10 +446,10 @@ int main( int argc, char* argv[] )
 
     // This value controls what the write function does to set up the RS485 hardware
     // (the actual value is stored in the DVR configuration somewhere but not very accessibly)
-    int config = 0;
+    int config        = 0;
     bool do_baud_rate = false;
     bool preconfig    = false;
-
+    bool improved     = false;
     printf( "[+] RS485 PELCO-D PTZ TESTER\n" );
 
     // check for command-line options
@@ -376,7 +464,7 @@ int main( int argc, char* argv[] )
         {
             case 'h':
                 print_usage(argv[0]);
-                break;
+                return 0;
             case 'b':
                 do_baud_rate = true;
                 break;
@@ -395,23 +483,44 @@ int main( int argc, char* argv[] )
             case '7':
                 config = 7;
                 break;
+            case 'i':
+                improved = true;
+                break;
             default:
                 printf( "[-] unrecognised option '-%c'\n", argv[i][1] );
                 return -1;
         }
     }
 
-    if( preconfig == true )
+    if( improved == true )
     {
-        printf( "[+] Doing hardware preconfiguration...\n" );
-        ptz_pre_open(config);
+        if( ptz_preconfig_improved() == false )
+        {
+            goto end;
+        }
+
+        // actually do the work
+        if( ptz_open( "/dev/ttyAMA1", &fd ) == false )
+        {
+            goto end;
+        }
+
+    }
+    else
+    {
+        if( preconfig == true )
+        {
+            printf( "[+] Doing hardware preconfiguration...\n" );
+            ptz_pre_open(config);
+        }
+
+        // actually do the work
+        if( ptz_open( "/dev/ttyAMA1", &fd ) == false )
+        {
+            goto end;
+        }
     }
 
-    // actually do the work
-    if( ptz_open( "/dev/ttyAMA1", &fd ) == false )
-    {
-        goto end;
-    }
     printf( "[+] Opened camera device...\n" );
 
     if( do_baud_rate == true )
